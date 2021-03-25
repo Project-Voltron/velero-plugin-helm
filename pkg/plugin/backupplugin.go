@@ -18,27 +18,28 @@ package plugin
 
 import (
 	"fmt"
+	"io"
+	"strconv"
+	"strings"
+
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	vdiscvoery "github.com/vmware-tanzu/velero/pkg/discovery"
 	"gopkg.in/yaml.v2"
-	"io"
+	storage "helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/restmapper"
-	storage "k8s.io/helm/pkg/storage/driver"
-	"strconv"
-	"strings"
 
 	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	clientset "github.com/vmware-tanzu/velero/pkg/generated/clientset/versioned"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	kcmdutil "github.com/vmware-tanzu/velero/third_party/kubernetes/pkg/kubectl/cmd/util"
+	rspb "helm.sh/helm/v3/pkg/release"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	rspb "k8s.io/helm/pkg/proto/hapi/release"
 )
 
 // BackupPlugin is a backup item action for helm chart.
@@ -73,7 +74,7 @@ func NewBackupPlugin(f client.Factory, resource string) func(logrus.FieldLogger)
 func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
 	return velero.ResourceSelector{
 		IncludedResources: []string{p.storage.Name()},
-		LabelSelector:     "OWNER=TILLER",
+		LabelSelector:     "owner=helm",
 	}, nil
 }
 
@@ -87,7 +88,7 @@ type manifest struct {
 
 func (r *releaseBackup) resourceNamespace(apiResource *metav1.APIResource) string {
 	if apiResource.Namespaced {
-		return r.release.GetNamespace()
+		return r.release.Namespace
 	}
 	return ""
 }
@@ -127,26 +128,26 @@ func (r *releaseBackup) fromManifest(manifestString string) ([]velero.ResourceId
 
 func filterReleaseName(releaseName string) func(rls *rspb.Release) bool {
 	return func(rls *rspb.Release) bool {
-		return rls.GetName() == releaseName
+		return rls.Name == releaseName
 	}
 }
 
 func (r *releaseBackup) hookResources(hook *rspb.Hook) ([]velero.ResourceIdentifier, error) {
 	// Hook never ran, skip it
-	if hook.GetLastRun().GetSeconds() == 0 {
+	if hook.LastRun.Phase != rspb.HookPhaseSucceeded {
 		return nil, nil
 	}
-	for _, p := range hook.GetDeletePolicies() {
+	for _, p := range hook.DeletePolicies {
 		// TODO: If hook has any other delete policies
 		// aside from before-hook-creation we need to check
 		// with kubernetes if it actually still exists, for now
 		// hooks with delete policy other than before-hook-creation
 		// will be skipped
-		if p != rspb.Hook_BEFORE_HOOK_CREATION {
+		if p != rspb.HookBeforeHookCreation {
 			return nil, nil
 		}
 	}
-	return r.fromManifest(hook.GetManifest())
+	return r.fromManifest(hook.Manifest)
 }
 
 func (r *releaseBackup) ResourceFor(gvk schema.GroupVersionKind) (schema.GroupVersionResource, metav1.APIResource, error) {
@@ -192,15 +193,15 @@ func (r *releaseBackup) runReleaseBackup() ([]velero.ResourceIdentifier, error) 
 	resources := make([]velero.ResourceIdentifier, 0)
 
 	// Only backup resources for releases that are deployed
-	if relVer.GetInfo().GetStatus().GetCode() == rspb.Status_DEPLOYED {
-		for _, hook := range relVer.GetHooks() {
+	if relVer.Info.Status == rspb.StatusDeployed {
+		for _, hook := range relVer.Hooks {
 			hookResources, err := r.hookResources(hook)
 			if err != nil {
 				return nil, err
 			}
 			resources = append(resources, hookResources...)
 		}
-		releaseResources, err := r.fromManifest(relVer.GetManifest())
+		releaseResources, err := r.fromManifest(relVer.Manifest)
 		if err != nil {
 			return nil, err
 		}
@@ -211,7 +212,7 @@ func (r *releaseBackup) runReleaseBackup() ([]velero.ResourceIdentifier, error) 
 			Resource: r.driver.Name(),
 		},
 		Namespace: r.metadata.GetNamespace(),
-		Name:      relVer.GetName() + "." + "v" + strconv.FormatInt(int64(relVer.GetVersion()), 10),
+		Name:      relVer.Name + "." + "v" + strconv.FormatInt(int64(relVer.Version), 10),
 	})
 
 	return resources, nil

@@ -17,8 +17,8 @@ limitations under the License.
 package plugin
 
 import (
+	storage "helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/client-go/kubernetes"
-	storage "k8s.io/helm/pkg/storage/driver"
 )
 
 type storageFactory interface {

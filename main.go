@@ -26,7 +26,7 @@ func main() {
 	f := client.NewFactory("velero-plugin-helm", client.VeleroConfig{})
 	srv := framework.NewServer()
 	for _, resource := range []string{"configmaps", "secrets"} {
-		srv.RegisterBackupItemAction("velero-plugin-helm/"+resource, plugin.NewBackupPlugin(f, resource))
+		srv.RegisterBackupItemAction("velero-plugin-helm3/"+resource, plugin.NewBackupPlugin(f, resource))
 	}
 	srv.Serve()
 }

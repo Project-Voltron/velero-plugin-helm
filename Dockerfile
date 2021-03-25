@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.14-buster AS build
-WORKDIR /go/src/github.com/runzexia/velero-plugin-helm
+FROM golang:1.16-buster AS build
+WORKDIR /go/src/github.com/lukaszo/velero-plugin-helm
 COPY . .
 RUN CGO_ENABLED=0 go build -o /go/bin/velero-plugin-helm .
 
